@@ -35,6 +35,7 @@ class Worker implements Runnable {
 	private boolean isStopped = false;
 	private ShutdownListener shutdownListener = null;
 	private Thread thread;
+    private List<Runnable> unfinishedTasks = new ArrayList<>();
 	
 	public Worker(BlockingQueue<Runnable> taskQueue) {
 		this.taskQueue = taskQueue;
@@ -44,15 +45,14 @@ class Worker implements Runnable {
 	public void run() {
 		
 		while(true) {
-			
+
 			try {
 				Runnable task = taskQueue.take();
 				//Calling Runnable.run() as this Worker is already running
 				//in a thread
 				task.run();
 			}
-			catch(PoisonPillException | InterruptedException e){
-				//ppe.printStackTrace();
+			catch(PoisonPillException e){
 				isStopped = true;
 				shutdownListener.shutdownComplete(this);
 				break;
@@ -69,8 +69,14 @@ class Worker implements Runnable {
 		this.shutdownNow();
 	}
 	
-	public void shutdownNow() {		
-		this.thread.interrupt();		
+	public void shutdownNow() {
+        taskQueue.drainTo(unfinishedTasks);
+        taskQueue.add(new Runnable() {
+            @Override
+            public void run() {
+                throw new PoisonPillException();
+            }
+        });
 	}
 
 	public void shutdown(ShutdownListener shutdownListener){
@@ -96,9 +102,9 @@ class Worker implements Runnable {
 	}
 	
 	public List<Runnable> getUnfinishedTasks(){
+        //again drain to unfinishedTasks as there might be some tasks assigned when Worker is being shutdown
+        taskQueue.drainTo(unfinishedTasks);
 		if(isWorkerStopped()){
-			List<Runnable> unfinishedTasks = new ArrayList<>();
-			taskQueue.drainTo(unfinishedTasks);
 			return unfinishedTasks;
 		} else {
 			throw new IllegalStateException("Worker not stopped yet.");
